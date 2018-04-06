@@ -2,7 +2,7 @@
 
 Repo to house my (currently) small collection of resampling scripts.
 
-<u>WORK IN PROGRESS</u>
+__WORK IN PROGRESS__
 
 **bootstrap_funcs.py**: Currently houses model validation using bootstrap. Why use k folds when the model can be tested on multiple out of group / bag / sample / *your favourite word here* data and the range of possible performance can be determined?
 
