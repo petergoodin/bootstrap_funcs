@@ -1,146 +1,133 @@
-def corr_mcc(dataframe, method = scipy.stats.spearmanr, n_shuffles = 10000, seed = 1010):
-    
-    """
-    
-    TO DO: 
-    
-    Run in parallel.
-    
-    Calculates post-hoc analses using the maxT correction from multiple comparisons (see Ge, Dudoit & Speed, 2003).
-    maxT generates a meta distribution based on the maximum observed statistic from a series
-    post-hoc comparisons.
-    
-    Each obs is then compared against the null maxT distribution using the obs > null / n_shuffles method
-    
+import scipy
+import numpy as np
+import joblib
+import itertools
+import matplotlib.pylab as plt
+
+def perm_corr_single(dataframe, combos, perm_idx, method = scipy.stats.spearmanr):
+    '''
+
+    Generates a single iteration of permuated correlation values
+    Used inside corr_mcc with perm_idx as the iterator.
+
     Input:
-    conditions - A list of the conditions to generate post-hoc analysis on
-    n_shuffles - The number of re-shuffles to generate the null distribution
-    method - The test statistic to use (default is dependent samples t test).
-    NOTE: Calls t_perm internally. Method is used by t_perm which takes two groups / measures.
-    Any more groups / measures will require hacking.
-    
+    dataframe - Dataframe to be correlated
+    combos - List of combinations (from itertools.combinations) in dataframe to be used - Note: Label 1 will be permutated.
+    perm_idx - List of indexes to use on each iteration
+    method - Correlation method (spearman by default)
+
     Output:
-    perm_cond - Permutations for each condition
-    maxT - maxT for each condition
-    p_ph - Post-hoc tests on whether to reject / keep null
-    
+    corrs - Single instance of permuted correlations (lower triangle)
+    '''
+
+    corrs = np.zeros(len(combos))
+
+    for labels_n, labels in enumerate(combos):
+        x = dataframe[labels[0]].values
+        y = dataframe[labels[1]].loc[perm_idx].values
+        corrs[labels_n] = method(x, y)[0]
+
+    return(corrs)
+
+
+
+def p_perm(obs_corrs, perm_corrs):
+    '''
+    Calculate p values and maxT corrected p values for correlations
+
+    maxT correction collects the maximum single value across valiables for each iteration.
+    The number of values from the maximum single value distribution greater than the observed
+    values becomes the corrected P value against multiple comparisons.
+
+    Input:
+    obs_corrs - Observed correlations
+    perm_corrs - Permuated correlations
+
+    Output:
+    p_raw - Uncorrected pvalues
+    p_maxT - Corrected p values
+    '''
+
+    p_raw = np.zeros_like(obs_corrs)
+
+    p_raw = np.array([sum(abs(perm_corrs[:, corr_n] > abs(obs_corrs[corr_n]))) / n_shuffles for corr_n in range(0, len(obs_corrs))])
+
+    maxT = np.array([max(max_val) for max_val in perm])
+    p_maxT = np.array([sum(abs(maxT) > abs(obs_corrs[corr_n])) / n_shuffles for corr_n in range(0, len(obs_corrs))])
+
+    return(p_raw, p_maxT)
+
+
+def corr_perm(dataframe,
+             n_shuffles = 10000,
+             seed = 1010,
+             replace = False,
+             n_jobs = 1,
+             verbose = 10,
+             method = scipy.stats.spearmanr):
+
     """
-    
-    np.random.seed(seed)
+    Main function for running permutation / bootstrapping correlations
+
+    Input:
+    dataframe - Data (r * c) to be correlated in the form of a pandas dataframe
+    n_shuffles - Number of permutations to run (Default - 10,000^)
+    seed - Seed for reproducable result
+    replace - Replace observation in shuffle? False = permutation, True = bootstrap
+    n_jobs - Number of cores to use
+    verbose - Level of verbosity (Default- 10 [very verbose])
+    method - Correlation method from scipy.stats (Default - spearmanr)
+
+    Output:
+    obs_corrs - Observed correlation values
+    perm_corrs - n_shuffles * lower triangle correlation matrix
+
+    ^ 10,000 permutations of a 16 * 57 matrix takes ~ 40 minutes using 8 cores of
+    a 3.6 GHz i7
+
+    """
 
     r, c = dataframe.shape
 
-    corr_labels = [l1 + '-' + l2 for l2 in dataframe.columns for l1 in dataframe.columns]
+    idx = [np.random.choice(dataframe.index, size = len(dataframe), replace = replace) for n in range(0, n_shuffles)]
 
-    t = n_shuffles * 0.25
+    combos = list(itertools.combinations(dataframe.columns, r = 2))
+    combo_labels = [label[0] + '-' + label[1] for label in combos]
+    combo_len = len(combos)
 
-    obs_corr = method(dataframe)[0]
+    obs_corrs = np.array([method(dataframe[labels[0]].values, dataframe[labels[1]].values)[0] for labels in combos]) #generate unpermuted data
 
-    perm_corr = np.zeros([n_shuffles, c, c])
+    perm_corrs = np.array(joblib.Parallel(n_jobs = n_jobs, verbose = verbose)(joblib.delayed(perm_corr_single)(dataframe, combos, perm_idx, method = scipy.stats.spearmanr) for perm_idx in idx))
 
-    for n in range(0, n_shuffles):
-        if n % t == 0:
-            print((n / n_shuffles) * 100)
+    p_raw = p_perm(obs_corrs, perm_corrs)
 
-        for n_outer, col_outer in enumerate(dataframe.columns):
-            x = dataframe[col_outer]
-            for n_inner, col_inner in enumerate(dataframe.columns):
-                rand_idxs = np.random.choice(dataframe.index, size = len(dataframe), replace = False)
-                y_perm = dataframe[col_inner].loc[rand_idxs]
-                perm_corr[n, n_outer, n_inner] = method(x, y_perm)[0]
+    return(obs_corrs, perm_corrs, p_raw, p_maxT, combos)
 
 
-    perm_array = perm_corr.reshape(n_shuffles, c * c)
-
-    obs_array = obs_corr.reshape(c * c)
-    maxT = np.zeros(n_shuffles)
-
-
-    for n in range(0, n_shuffles):
-        maxT[n] = np.max(perm_array[n])
-
-    p_ph_array = np.zeros(c*c)
-
-
-    for n in range(0, n_shuffles):
-        idx = np.where(np.max(np.abs(perm_array[n])))
-        maxT[n] = perm_array[n, idx]
-
-    for n in range(0, c * c):
-        p_ph_array[n] = sum(abs(maxT) > abs(obs_array[n])) / n_shuffles
-
-    p_ph = p_ph_array.reshape([c, c])
-    
-    print('Complete')
-    return(obs_corr, perm_corr, maxT, p_ph)
-    
-def plot_corr_perms(corr_obs, corr_perms, alpha = 0.05, labels = None):
+def plot_corr_perms(dataframe, corr_obs, p, alpha = 0.05):
     '''
     Used to plot distributions of bootstrapped correlation output for troubleshooting + validation
-    
+
+    dataframe -Data (r * c) to be correlated in the form of a pandas dataframe
     corr_obs - Observed correlation values
-    corr_perm - Permutated null correlation values
+    p - p values (either raw or corrected). Note: Get output from corr_perm
     alpha - The threshold which a correlation is deemed "significantly" unlikely to be equal to the null.
-    labels = Input a list of labels for the correlations
     '''
-    
-    fig = plt.figure(figsize = [20, 20])
-    n_samples, r, c = corr_size = corr_perms.shape
+    r, c = dataframe.shape
+    cols = dataframe.columns
 
-    #Reshape matrices to 1d
-    corr_obs_rs = np.reshape(corr_obs, [r * c])
-    corr_perms_rs = np.reshape(corr_perms, [n_samples, r * c])
-    
-    #Create boolean array to test if reshaped value is from matrix diagonal.
-    di = np.diag_indices(r)
-    zero_mat = np.zeros_like(corr_obs)
-    zero_mat[di] = 1
-    diag_array = np.reshape(zero_mat, [r * c])
-    
-    #Create boolean array to store values below alpha
-    p_mat = np.zeros_like(corr_obs)
-    p_array = np.reshape(p_mat, [r * c])
-    
+    z = np.zeros([c, c])
 
-    for n in range(r * c):
-        corr_obs_val = corr_obs_rs[n]
-        ax = plt.subplot(r, c, n + 1)
-        perm_plot_data = corr_perms_rs[:, n]
-        sns.distplot(perm_plot_data, hist = False, kde = True, norm_hist = False)
+    iu = np.triu_indices(c, k = 1)
+    il = iu[::-1] #reverse for lower
 
-        #Plot obs val on null dist
-        obs_plot_data = corr_obs_rs[n]
-        xmin, xmax = [ax.dataLim.min[0], ax.dataLim.max[0]]
-        ymin, ymax = [ax.dataLim.min[1], ax.dataLim.max[1]]
-        plt.grid('on')
-        plt.vlines(obs_plot_data, ymin, ymax, colors = [1, 0, 0], linestyles = '--')
-        
-        p = sum(abs(corr_perms_rs[:, n]) > abs(corr_obs_rs[n])) / n_samples
-        plt.xlabel(p)
-        
-        if p < alpha:
-            if corr_obs_rs[n] > 0:
-                plt.ylabel('***', fontsize = 25, color = [1,0,0])
-            elif corr_obs_rs[n] < 0:
-                plt.ylabel('***', fontsize = 25, color = [0,0,1])
-            p_array[n] = 1
-            
+    sig_idxs = np.ravel(np.where(p_corr < 0.05))
 
-        if labels != None:
-            plt.title(labels[n], fontsize = 8)
-        
-        #Clear diagonal 
-        if diag_array[n] == 1: 
-            plt.cla()
-            plt.axis('off')
-        ax.set_facecolor('w')
-    plt.tight_layout()
-    plt.show()
-    
-    p_mat = np.reshape(p_array, [r, c])
-    
-    return(fig, p_mat)
+    corr_obs_sig = np.array([corr_obs[n] if n in sig_idxs else 0 for n in range(0, len(corr_obs))])
 
-def jitter(vals):
-    stdev = .01 * (max(vals) - min(vals))
-    return(vals + np.random.randn(len(vals)) * stdev)
+    z[iu] = corr_obs
+    z[il] = corr_obs_sig
+
+    df = pd.DataFrame(data = z, columns = cols, index = cols)
+
+    sns.heatmap(df, vmin = -1, vmax = 1, cmap = 'RdYlBu_r')
