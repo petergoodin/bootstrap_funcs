@@ -121,7 +121,7 @@ def plot_corr_perms(dataframe, corr_obs, p, alpha = 0.05):
     iu = np.triu_indices(c, k = 1)
     il = iu[::-1] #reverse for lower
 
-    sig_idxs = np.ravel(np.where(p_corr < 0.05))
+    sig_idxs = np.ravel(np.where(p < 0.05))
 
     corr_obs_sig = np.array([corr_obs[n] if n in sig_idxs else 0 for n in range(0, len(corr_obs))])
 
