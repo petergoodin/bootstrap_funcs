@@ -52,7 +52,7 @@ def p_perm(obs_corrs, perm_corrs):
 
     p_raw = np.array([sum(abs(perm_corrs[:, corr_n] > abs(obs_corrs[corr_n]))) / n_shuffles for corr_n in range(0, len(obs_corrs))])
 
-    maxT = np.array([max(max_val) for max_val in perm])
+    maxT = np.array([max(max_val) for max_val in perm_corrs])
     p_maxT = np.array([sum(abs(maxT) > abs(obs_corrs[corr_n])) / n_shuffles for corr_n in range(0, len(obs_corrs))])
 
     return(p_raw, p_maxT)
