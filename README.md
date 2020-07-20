@@ -5,7 +5,7 @@ ___
 WORK IN PROGRESS
 ___
 
-**bootstrap_funcs.py**: Currently houses model validation using bootstrap. Why use k folds when the model can be tested on multiple out of group / bag / sample / *your favourite word here* data and the range of possible performance can be determined?
+**classifier_bs_funcs.py**: Compute classification metrics and classification reports with CI.
 
 **corr_perm_funcs.py**: Permute correlations and correct for multiple comparisons using the maxT method.
 
